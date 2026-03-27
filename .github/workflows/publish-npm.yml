@@ -1,0 +1,78 @@
+name: Publish to npm
+
+on:
+  # Reusable workflow entrypoint for package repositories.
+  workflow_call:
+    inputs:
+      node_version:
+        description: Node.js version to use for the publish job.
+        required: false
+        type: string
+        default: "20"
+    secrets:
+      NPM_TOKEN:
+        description: npm token used for publishing.
+        required: true
+
+jobs:
+  publish:
+    name: publish
+    runs-on: ubuntu-latest
+
+    steps:
+      # Identify which shared repository and ref exposed this workflow.
+      - name: Resolve shared repository
+        id: resolve_shared
+        shell: bash
+        run: |
+          workflow_ref="${{ github.workflow_ref }}"
+          shared_repository="${workflow_ref%%/.github/workflows/*}"
+          shared_ref="${workflow_ref##*@}"
+
+          echo "repository=$shared_repository" >> "$GITHUB_OUTPUT"
+          echo "ref=$shared_ref" >> "$GITHUB_OUTPUT"
+
+      # Checkout the consumer repository that called this reusable workflow.
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Checkout shared helper scripts so the workflow logic stays thin.
+      - name: Checkout shared assets
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ steps.resolve_shared.outputs.repository }}
+          ref: ${{ steps.resolve_shared.outputs.ref }}
+          path: .shared
+
+      # Configure Node.js and npm registry access for install and publish steps.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+          registry-url: https://registry.npmjs.org
+
+      # Validate the release tag and export TAG_VERSION for later checks.
+      - name: Validate tag
+        run: bash ./.shared/scripts/github/validate-tag.sh
+
+      # Install dependencies with npm install because lockfile policy may vary.
+      - name: Install deps
+        run: npm install
+
+      # Ensure package.json version exactly matches the release tag version.
+      - name: Check package.json version
+        run: node ./.shared/scripts/node/verify-package-version.mjs
+
+      # Rewrite exports paths so published package points at dist output.
+      - name: Rewrite exports src -> dist
+        run: node ./.shared/scripts/node/rewrite-exports-src-to-dist.mjs
+
+      # Build the package before publishing it to npm.
+      - name: Build
+        run: npm run build
+
+      # Publish the package to the public npm registry.
+      - name: Publish
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

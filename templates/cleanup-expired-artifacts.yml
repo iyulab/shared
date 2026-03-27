@@ -1,0 +1,10 @@
+name: Cleanup Expired Artifacts
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 0"
+
+jobs:
+  cleanup:
+    uses: iyulab/shared/.github/workflows/cleanup-expired-artifacts.yml@main

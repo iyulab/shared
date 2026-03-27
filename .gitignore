@@ -1,0 +1,6 @@
+# dependencies (if scripts are run locally)
+node_modules/
+
+# OS artifacts
+.DS_Store
+Thumbs.db

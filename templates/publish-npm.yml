@@ -1,0 +1,15 @@
+name: Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    uses: iyulab/shared/.github/workflows/publish-npm.yml@main
+    with:
+      node_version: "20"
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
