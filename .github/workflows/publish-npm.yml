@@ -25,9 +25,21 @@ jobs:
         id: resolve_shared
         shell: bash
         run: |
+          set -euo pipefail
+
           workflow_ref="${{ github.workflow_ref }}"
           shared_repository="${workflow_ref%%/.github/workflows/*}"
           shared_ref="${workflow_ref##*@}"
+
+          if [[ -z "$shared_repository" || "$shared_repository" == "$workflow_ref" ]]; then
+            echo "::error::Could not extract shared repository from workflow_ref: '$workflow_ref'"
+            exit 1
+          fi
+
+          if [[ -z "$shared_ref" || "$shared_ref" == "$workflow_ref" ]]; then
+            echo "::error::Could not extract shared ref from workflow_ref: '$workflow_ref'"
+            exit 1
+          fi
 
           echo "repository=$shared_repository" >> "$GITHUB_OUTPUT"
           echo "ref=$shared_ref" >> "$GITHUB_OUTPUT"
@@ -43,6 +55,7 @@ jobs:
           repository: ${{ steps.resolve_shared.outputs.repository }}
           ref: ${{ steps.resolve_shared.outputs.ref }}
           path: .shared
+          sparse-checkout: scripts/
 
       # Configure Node.js and npm registry access for install and publish steps.
       - name: Setup Node
