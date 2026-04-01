@@ -20,40 +20,17 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # Identify which shared repository and ref exposed this workflow.
-      - name: Resolve shared repository
-        id: resolve_shared
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          workflow_ref="${{ github.workflow_ref }}"
-          shared_repository="${workflow_ref%%/.github/workflows/*}"
-          shared_ref="${workflow_ref##*@}"
-
-          if [[ -z "$shared_repository" || "$shared_repository" == "$workflow_ref" ]]; then
-            echo "::error::Could not extract shared repository from workflow_ref: '$workflow_ref'"
-            exit 1
-          fi
-
-          if [[ -z "$shared_ref" || "$shared_ref" == "$workflow_ref" ]]; then
-            echo "::error::Could not extract shared ref from workflow_ref: '$workflow_ref'"
-            exit 1
-          fi
-
-          echo "repository=$shared_repository" >> "$GITHUB_OUTPUT"
-          echo "ref=$shared_ref" >> "$GITHUB_OUTPUT"
-
       # Checkout the consumer repository that called this reusable workflow.
       - name: Checkout
         uses: actions/checkout@v4
 
       # Checkout shared helper scripts so the workflow logic stays thin.
+      # NOTE: github.workflow_ref returns the *caller's* workflow path, not this
+      # reusable workflow's path, so the repository is hardcoded to iyulab/shared.
       - name: Checkout shared assets
         uses: actions/checkout@v4
         with:
-          repository: ${{ steps.resolve_shared.outputs.repository }}
-          ref: ${{ steps.resolve_shared.outputs.ref }}
+          repository: iyulab/shared
           path: .shared
           sparse-checkout: scripts/
 
