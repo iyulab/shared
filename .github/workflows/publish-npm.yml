@@ -40,6 +40,7 @@ jobs:
         with:
           node-version: ${{ inputs.node_version }}
           registry-url: https://registry.npmjs.org
+          cache: 'npm'
 
       # Validate the release tag and export TAG_VERSION for later checks.
       - name: Validate tag
