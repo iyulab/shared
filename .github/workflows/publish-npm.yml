@@ -35,12 +35,13 @@ jobs:
           sparse-checkout: scripts/
 
       # Configure Node.js and npm registry access for install and publish steps.
+      # cache is set only when a lock file exists; packages without one skip caching.
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: ${{ inputs.node_version }}
           registry-url: https://registry.npmjs.org
-          cache: 'npm'
+          cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
 
       # Validate the release tag and export TAG_VERSION for later checks.
       - name: Validate tag
