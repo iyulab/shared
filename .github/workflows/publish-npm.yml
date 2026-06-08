@@ -14,6 +14,11 @@ on:
         description: npm token used for publishing.
         required: true
 
+# 동일 패키지의 동시 publish를 방지한다(태그 재푸시 / 수동 dispatch 경쟁 차단).
+concurrency:
+  group: npm-publish-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: publish
@@ -22,49 +27,70 @@ jobs:
     steps:
       # Checkout the consumer repository that called this reusable workflow.
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # Checkout shared helper scripts so the workflow logic stays thin.
       # NOTE: github.workflow_ref returns the *caller's* workflow path, not this
       # reusable workflow's path, so the repository is hardcoded to iyulab/shared.
       - name: Checkout shared assets
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: iyulab/shared
           path: .shared
           sparse-checkout: scripts/
 
       # Configure Node.js and npm registry access for install and publish steps.
-      # cache is set only when a lock file exists; packages without one skip caching.
+      # cache is set only when a lock file exists; lock-less packages skip caching.
+      # setup-node v5 의 packageManager 기반 자동 캐싱은 lock-less(npm install) 정책과
+      # 충돌하므로 package-manager-cache 를 비활성화한다.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v5
         with:
           node-version: ${{ inputs.node_version }}
           registry-url: https://registry.npmjs.org
           cache: ${{ hashFiles('package-lock.json') != '' && 'npm' || '' }}
+          package-manager-cache: false
 
-      # Validate the release tag and export TAG_VERSION for later checks.
+      # Validate the release tag and export TAG_VERSION (to GITHUB_ENV) for later steps.
       - name: Validate tag
         run: bash ./.shared/scripts/github/validate-tag.sh
 
+      # Idempotency: if this version is already on npm, skip the remaining steps so a
+      # re-pushed tag or re-dispatch cannot churn/overwrite an existing publish.
+      - name: Check if already published
+        id: published
+        run: |
+          PKG_NAME=$(node -p "require('./package.json').name")
+          if npm view "${PKG_NAME}@${TAG_VERSION}" version > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${PKG_NAME}@${TAG_VERSION} is already published — skipping publish."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       # Install dependencies with npm install because lockfile policy may vary.
       - name: Install deps
+        if: steps.published.outputs.exists != 'true'
         run: npm install
 
       # Ensure package.json version exactly matches the release tag version.
       - name: Check package.json version
+        if: steps.published.outputs.exists != 'true'
         run: node ./.shared/scripts/node/verify-package-version.mjs
 
       # Rewrite exports paths so published package points at dist output.
       - name: Rewrite exports src -> dist
+        if: steps.published.outputs.exists != 'true'
         run: node ./.shared/scripts/node/rewrite-exports-src-to-dist.mjs
 
       # Build the package before publishing it to npm.
       - name: Build
+        if: steps.published.outputs.exists != 'true'
         run: npm run build
 
       # Publish the package to the public npm registry.
       - name: Publish
+        if: steps.published.outputs.exists != 'true'
         run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
