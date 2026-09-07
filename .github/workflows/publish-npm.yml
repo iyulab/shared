@@ -45,10 +45,10 @@ jobs:
 
       # Configure Node.js and npm registry access for install and publish steps.
       # cache is set only when a lock file exists; lock-less packages skip caching.
-      # setup-node v5 의 packageManager 기반 자동 캐싱은 lock-less(npm install) 정책과
+      # setup-node 의 packageManager 기반 자동 캐싱은 lock-less(npm install) 정책과
       # 충돌하므로 package-manager-cache 를 비활성화한다.
       - name: Setup Node
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v7
         with:
           node-version: ${{ inputs.node_version }}
           registry-url: https://registry.npmjs.org
