@@ -8,7 +8,11 @@ on:
         description: Node.js version to use for the publish job.
         required: false
         type: string
-        default: "22"
+        # 소비 리포들의 ci.yml 기준선(24)을 따라간다. 이 기본값이 기준선보다 낮으면,
+        # node_version 을 명시하지 않는 새 소비자가 구버전으로 게시를 시도하게 된다.
+        # 특히 22 는 lock-less install 경로에서 번들 npm 의 arborist 가
+        # "Cannot read properties of null (reading 'edgesOut')" 로 크래시하는 버전이다.
+        default: "24"
     secrets:
       NPM_TOKEN:
         description: npm token used for publishing.

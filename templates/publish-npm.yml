@@ -9,7 +9,9 @@ on:
 jobs:
   publish:
     uses: iyulab/shared/.github/workflows/publish-npm.yml@main
-    with:
-      node_version: "20"
+    # node_version 은 생략해 재사용 워크플로의 기본값을 따른다 — 여기에 값을 박으면
+    # 그 순간부터 공유 기준선과 조용히 벌어진다. 특정 버전 고정이 필요할 때만 켠다.
+    # with:
+    #   node_version: "24"
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
