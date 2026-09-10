@@ -20,8 +20,7 @@
 
 전체 브리핑은 [cycle-logs/RUN-SUMMARY-2026-09-10.md](cycle-logs/RUN-SUMMARY-2026-09-10.md).
 
-- **push 시점** — 이 런의 모든 변경이 여기에 묶여 있다.
-- **소비자 SHA 핀 전진** (ROADMAP P4) — push 만으로는 도달하지 않는다.
+- **소비자 SHA 핀 전진** (ROADMAP P4) — push 는 끝났지만 소비 리포가 `@a812e48` 를 핀 중이라 도달하지 않는다. 세션 워크스페이스 밖 리포 작업이라 여기서 수행 불가.
 - **`cleanup-expired-artifacts.yml` 존폐** — 용량을 회수하지 않음이 실측으로 확인됐다(cycle-05).
 - **`CHANGELOG.md` 도입 여부** — 소비자가 핀 전진 판단 근거를 갖게 된다.
 - **구조 개선 제안 3건** — CONTRIBUTING↔SKILL 중복 · actionlint 도입 · `rewrite-exports` 의 `main`/`types` 처리.
