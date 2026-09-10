@@ -11,14 +11,27 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
 
+    # publish-npm.yml 과 같은 이유로 여기에 선언한다 — caller job 은 timeout-minutes 를 가질
+    # 수 없다. 이 워크플로는 주간 cron 이라 행 걸려도 사람이 보고 있지 않고, 아래 스텝이
+    # 아티팩트 전체를 페이지네이션한 뒤 개별 삭제를 루프로 돌아 매달리기 쉬운 모양이다.
+    timeout-minutes: 20
+
     steps:
-      # Query repository artifacts, delete expired ones, and write a short summary.
-      - name: Delete expired artifacts
+      # 이 스텝은 «저장 용량을 회수하지 않는다». `expired: true` 는 보존기간이 지나 GitHub 이
+      # 콘텐츠를 «이미» 삭제했다는 뜻이고(만료 아티팩트의 다운로드 엔드포인트는 410 Artifact
+      # has expired 를 반환한다), 그 시점에 용량은 이미 회수돼 있다. 남아 있는 것은 레코드뿐이다.
+      #
+      # 그런데 API 는 만료 후에도 `size_in_bytes` 에 «원래» 크기를 계속 실어 준다. 이전 판은 그
+      # 값을 합산해 "Freed N MB" 로 보고했고, 그래서 실제로 0바이트를 회수하고도 수 GB 를
+      # 회수한 것처럼 요약이 찍혔다. 그 수치를 되살리지 말 것 — 측정된 값이 아니라 허수다.
+      #
+      # 용량을 실제로 줄이는 손잡이는 여기가 아니라 업로드 쪽 `retention-days` 다.
+      - name: Remove expired artifact records
         uses: actions/github-script@v8
         with:
           script: |
-            let totalDeleted = 0;
-            let totalFreedBytes = 0;
+            let totalRemoved = 0;
+            let totalFailed = 0;
 
             const artifacts = await github.paginate(
               github.rest.actions.listArtifactsForRepo,
@@ -27,11 +40,11 @@ jobs:
 
             const expired = artifacts.filter((artifact) => artifact.expired);
             if (expired.length === 0) {
-              core.info('No expired artifacts found');
+              core.info('No expired artifact records found');
               return;
             }
 
-            core.info(`Found ${expired.length} expired artifacts`);
+            core.info(`Found ${expired.length} expired artifact record(s) to remove`);
 
             for (const artifact of expired) {
               try {
@@ -40,21 +53,28 @@ jobs:
                   repo: context.repo.repo,
                   artifact_id: artifact.id,
                 });
-                totalDeleted++;
-                totalFreedBytes += artifact.size_in_bytes;
-                core.info(`Deleted: ${artifact.name} (${(artifact.size_in_bytes / 1048576).toFixed(1)} MB)`);
+                totalRemoved++;
+                core.info(`Removed record: ${artifact.name}`);
               } catch (error) {
-                core.warning(`Failed to delete ${artifact.name}: ${error.message}`);
+                totalFailed++;
+                core.warning(`Failed to remove ${artifact.name}: ${error.message}`);
               }
             }
 
-            core.info(`\nDeleted ${totalDeleted} artifacts, freed ${(totalFreedBytes / 1048576).toFixed(1)} MB`);
+            core.info(
+              `\nRemoved ${totalRemoved} expired artifact record(s). ` +
+              'No storage is reclaimed by this: the content was already deleted at expiry.'
+            );
 
             await core.summary
               .addHeading('Artifact Cleanup')
               .addTable([
                 [{ data: 'Metric', header: true }, { data: 'Value', header: true }],
-                ['Deleted', String(totalDeleted)],
-                ['Freed', `${(totalFreedBytes / 1048576).toFixed(1)} MB`],
+                ['Expired records removed', String(totalRemoved)],
+                ['Failed', String(totalFailed)],
               ])
+              .addRaw(
+                'Removing an expired record frees no storage - GitHub deletes the content when the ' +
+                'artifact expires. Use `retention-days` on upload to control storage.'
+              )
               .write();

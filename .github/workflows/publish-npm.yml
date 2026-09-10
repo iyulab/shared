@@ -18,6 +18,13 @@ on:
         description: npm token used for publishing.
         required: true
 
+# 이 워크플로가 GITHUB_TOKEN 을 쓰는 곳은 체크아웃뿐이다 — 레지스트리 인증은 NPM_TOKEN 이
+# 하고, 어떤 스텝도 리포에 쓰지 않는다. 선언이 없으면 호출한 리포의 기본 권한을 그대로 받으므로
+# 필요한 최소만 명시한다. 재사용 워크플로의 permissions 는 caller 가 가진 것을 넘어설 수 없고
+# 좁히기만 하므로, 이 선언이 소비자의 다른 워크플로에 영향을 주지는 않는다.
+permissions:
+  contents: read
+
 # 동일 패키지의 동시 publish를 방지한다(태그 재푸시 / 수동 dispatch 경쟁 차단).
 concurrency:
   group: npm-publish-${{ github.repository }}
@@ -27,6 +34,13 @@ jobs:
   publish:
     name: publish
     runs-on: ubuntu-latest
+
+    # caller job 은 timeout-minutes 를 선언할 수 없다 — 재사용 워크플로 호출 job 의 허용 키
+    # 목록에 없어서 붙이면 Unexpected value 로 파싱이 깨진다. 즉 이 상한은 여기에만 존재할 수
+    # 있고, 없으면 GitHub 기본값 6시간이 그대로 적용된다. 위 concurrency 그룹이 소비자 리포
+    # 단위라, 행 걸린 run 하나가 그 패키지의 후속 게시를 그 6시간 동안 봉쇄한다.
+    # 20 은 이 job 의 정상 소요보다 훨씬 크게 잡은 값이다 — 정확한 값보다 상한의 존재가 요점이다.
+    timeout-minutes: 20
 
     steps:
       # Checkout the consumer repository that called this reusable workflow.

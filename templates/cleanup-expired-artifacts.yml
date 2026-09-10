@@ -1,5 +1,8 @@
 name: Cleanup Expired Artifacts
 
+# 이 워크플로는 «용량을 회수하지 않는다». 보존기간이 지난 아티팩트는 그 시점에 GitHub 이
+# 콘텐츠를 삭제하며, 여기서 지우는 것은 뒤에 남는 레코드뿐이다. 저장 용량을 줄이려면
+# 업로드 쪽 retention-days 를 설정한다 — 그것이 유일한 손잡이다.
 on:
   workflow_dispatch:
   schedule:
@@ -7,4 +10,6 @@ on:
 
 jobs:
   cleanup:
+    # 이 job 은 caller 라서 timeout-minutes·env·runs-on 같은 job 키를 가질 수 없다 — 붙이면 문법
+    # 오류다. 그 설정들은 호출되는 워크플로가 소유한다. README 의 "What the reusable workflows own" 참조.
     uses: iyulab/shared/.github/workflows/cleanup-expired-artifacts.yml@main

@@ -14,6 +14,12 @@ description: Repository conventions for the iyulab/shared hybrid repository.
 - Agent-readable guidance goes in skills/.
 - Do not duplicate implementation files inside skills/.
 
+## Reusable workflow guarantees
+
+A calling job cannot declare `timeout-minutes`, `env`, `runs-on`, or most other job-level keys, so
+the called workflow owns them. CONTRIBUTING.md holds the rule and the full key list — do not restate
+it here.
+
 ## Change management
 
 - Keep skill content aligned with the actual implementation.

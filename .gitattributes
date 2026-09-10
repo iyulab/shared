@@ -1,0 +1,12 @@
+# Normalize line endings on commit and check out LF everywhere.
+# scripts/ are executed by Linux runners; a CRLF shell script fails there,
+# so this is a correctness setting, not a style one.
+* text=auto eol=lf
+
+*.sh   text eol=lf
+*.mjs  text eol=lf
+*.yml  text eol=lf
+*.md   text eol=lf
+
+*.png binary
+*.ico binary

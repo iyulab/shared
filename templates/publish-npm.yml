@@ -8,6 +8,8 @@ on:
 
 jobs:
   publish:
+  # 이 job 은 caller 라서 timeout-minutes·env·runs-on 같은 job 키를 가질 수 없다 — 붙이면 문법
+  # 오류다. 그 설정들은 호출되는 워크플로가 소유한다. README 의 "What the reusable workflows own" 참조.
     uses: iyulab/shared/.github/workflows/publish-npm.yml@main
     # node_version 은 생략해 재사용 워크플로의 기본값을 따른다 — 여기에 값을 박으면
     # 그 순간부터 공유 기준선과 조용히 벌어진다. 특정 버전 고정이 필요할 때만 켠다.

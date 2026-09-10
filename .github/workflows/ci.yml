@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# 검증은 최신 커밋에 대해서만 의미가 있으므로 같은 ref 의 이전 실행은 취소한다.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: check
+    runs-on: ubuntu-latest
+
+    # CONTRIBUTING 이 모든 job 에 요구하는 상한을 이 워크플로 자신도 지킨다.
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      # 검사 목록은 여기가 아니라 check-all.py 가 갖는다 — 양쪽에 나열하면 반드시 벌어진다.
+      # 기여자가 로컬에서 돌리는 명령도 정확히 이 한 줄이다.
+      # PyYAML 은 ubuntu 러너에 선설치돼 있어 설치 스텝이 없다.
+      - name: Run all checks
+        run: python3 scripts/ci/check-all.py
