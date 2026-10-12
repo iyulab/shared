@@ -10,7 +10,6 @@ scripts/             helper scripts, plus the checks CI runs
 templates/           ready-to-copy files
 assets/              company logo and icon files
 skills/              agent-usable skills and guidance
-claudedocs/          development notes for this repository - not a shared asset
 ```
 
 ## How to use

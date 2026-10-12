@@ -8,3 +8,6 @@ Thumbs.db
 # Python bytecode from the CI check scripts
 __pycache__/
 *.pyc
+
+# Development tracking notes stay local: this is a public repository
+claudedocs/
