@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Contract tests for the scripts the reusable workflows execute.
 
-These three scripts run inside every consuming repository's publish, so a regression
+These scripts run inside every consuming repository's publish, so a regression
 here breaks publishing everywhere at once. Each case runs the real script the way the
 workflow does - same environment variables, same working directory - and asserts the
 exit status and the observable effect.
@@ -19,6 +19,8 @@ import tempfile
 VALIDATE_TAG = os.path.join("scripts", "github", "validate-tag.sh")
 VERIFY_VERSION = os.path.join("scripts", "node", "verify-package-version.mjs")
 REWRITE_EXPORTS = os.path.join("scripts", "node", "rewrite-exports-src-to-dist.mjs")
+PACK_FOR_PUBLISH = os.path.join("scripts", "node", "pack-for-publish.sh")
+VERIFY_PACKED = os.path.join("scripts", "node", "verify-packed-manifest.mjs")
 
 failures = []
 passes = 0
@@ -37,7 +39,7 @@ def report(name, ok, detail=""):
 def run(command, cwd=None, env=None):
     environment = dict(os.environ)
     # Keep an inherited value from leaking into a case that means to unset it.
-    for key in ("TAG_VERSION", "GITHUB_REF_NAME", "GITHUB_ENV"):
+    for key in ("TAG_VERSION", "GITHUB_REF_NAME", "GITHUB_ENV", "RUNNER_TEMP", "PACKED_DIR", "PACKED_TARBALL"):
         environment.pop(key, None)
     environment.update(env or {})
     return subprocess.run(
@@ -213,6 +215,189 @@ def test_rewrite_exports(node):
     )
 
 
+def write_tree(root, files):
+    """Create `files` ({relative path: text}) under `root`."""
+    for relative, text in files.items():
+        path = os.path.join(root, *relative.split("/"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+
+
+# ------------------------------------------------------------ verify-packed-manifest.mjs
+
+def test_verify_packed_manifest(node):
+    script = os.path.abspath(VERIFY_PACKED)
+
+    def call(manifest, files, packed_dir=True):
+        workspace = tempfile.mkdtemp(prefix="packed-")
+        write_tree(workspace, dict(files, **{"package.json": json.dumps(manifest)}))
+        env = {"PACKED_DIR": workspace} if packed_dir else {}
+        result = run([node, script], cwd=tempfile.gettempdir(), env=env)
+        shutil.rmtree(workspace, ignore_errors=True)
+        return result.returncode, result.stderr
+
+    complete = {
+        "name": "p",
+        "main": "dist/index",
+        "module": "./dist/index.js",
+        "types": "./dist/index",
+        "browser": {"./dist/node.js": "./dist/browser.js", "fs": False},
+        "bin": {"p": "./bin/cli.js"},
+        "exports": {
+            ".": {"types": "./dist/index.d.ts", "import": "./dist/index.js"},
+            "./sub/*": {"import": "./dist/sub/*.js"},
+            "./assets/": "./dist/assets/",
+            "./internal/*": None,
+            "./package.json": "./package.json",
+        },
+        "imports": {"#dep": "some-package", "#util": "./dist/util.js"},
+    }
+    tree = {
+        "dist/index.js": "",
+        "dist/index.d.ts": "",
+        "dist/browser.js": "",
+        "dist/util.js": "",
+        "dist/sub/deep/a.js": "",
+        "dist/assets/logo.svg": "",
+        "bin/cli.js": "",
+    }
+    code, stderr = call(complete, tree)
+    report(
+        "verify-packed: every declared entry point resolves (extensions, patterns, folders, null, bare names)",
+        code == 0,
+        stderr.strip(),
+    )
+
+    # The exact class this guards: the manifest still declares a module the tarball lost.
+    dropped = dict(tree)
+    del dropped["dist/index.js"]
+    code, stderr = call(complete, dropped)
+    report(
+        "verify-packed: a declared module missing from the tarball fails and names the field",
+        code != 0 and 'exports["."]["import"]: ./dist/index.js' in stderr and "module:" in stderr,
+        stderr.strip(),
+    )
+
+    code, stderr = call({"name": "p", "exports": {"./sub/*": "./dist/sub/*.js"}}, {"dist/other.js": ""})
+    report(
+        "verify-packed: a subpath pattern that matches no packed file fails",
+        code != 0 and "./dist/sub/*.js" in stderr,
+        stderr.strip(),
+    )
+
+    # rewrite-exports only rewrites `exports`, so `main` can still name src/. The check
+    # reads the packed manifest and so reports it instead of letting it ship.
+    code, stderr = call({"name": "p", "main": "./src/index.js", "exports": "./dist/index.js"}, {"dist/index.js": ""})
+    report(
+        "verify-packed: a 'main' left pointing at unpacked sources fails",
+        code != 0 and "main: ./src/index.js" in stderr,
+        stderr.strip(),
+    )
+
+    code, stderr = call({"name": "p", "exports": "../outside.js"}, {"dist/index.js": ""})
+    report("verify-packed: a target outside the package root fails", code != 0, stderr.strip())
+
+    code, stderr = call({"name": "p", "bin": "./bin/cli"}, {"bin/cli.js": ""})
+    report("verify-packed: 'bin' is taken verbatim (no extension lookup)", code != 0, stderr.strip())
+
+    code, stderr = call({"name": "p", "version": "1.0.0"}, {"README.md": ""})
+    report("verify-packed: a manifest declaring no entry points passes", code == 0, stderr.strip())
+
+    code, _ = call({"name": "p"}, {}, packed_dir=False)
+    report("verify-packed: fails when PACKED_DIR is unset", code != 0)
+
+
+# ------------------------------------------------------------------- pack-for-publish.sh
+
+def test_pack_for_publish(bash, node):
+    script = os.path.abspath(PACK_FOR_PUBLISH)
+    verify = os.path.abspath(VERIFY_PACKED)
+
+    def call(manifest, files, with_runner_temp=True, with_github_env=True):
+        workspace = tempfile.mkdtemp(prefix="pack-")
+        package = os.path.join(workspace, "pkg")
+        runner_temp = os.path.join(workspace, "runner-temp")
+        os.makedirs(runner_temp)
+        write_tree(package, dict(files, **{"package.json": json.dumps(manifest)}))
+        env_file = os.path.join(workspace, "github_env")
+        open(env_file, "w", encoding="utf-8").close()
+        env = {}
+        if with_runner_temp:
+            env["RUNNER_TEMP"] = runner_temp
+        if with_github_env:
+            env["GITHUB_ENV"] = env_file
+        result = run([bash, script], cwd=package, env=env)
+        with open(env_file, encoding="utf-8") as handle:
+            exported = dict(line.split("=", 1) for line in handle.read().splitlines() if "=" in line)
+        return workspace, result, exported
+
+    def packed_files(exported):
+        root = exported.get("PACKED_DIR", "")
+        found = set()
+        for directory, _, names in os.walk(root):
+            for name in names:
+                found.add(os.path.relpath(os.path.join(directory, name), root).replace(os.sep, "/"))
+        return found
+
+    manifest = {
+        "name": "fixture",
+        "version": "1.0.0",
+        "files": ["dist"],
+        "exports": "./dist/index.js",
+        # Proves the order: prepublishOnly has to run before the tarball is made, as it
+        # would in a directory publish, or the file it writes could not be in it.
+        "scripts": {"prepublishOnly": "node -e \"require('fs').writeFileSync('dist/stamp.txt', 'x')\""},
+    }
+    workspace, result, exported = call(manifest, {"dist/index.js": "", "src/index.ts": ""})
+    files = packed_files(exported)
+    tarball = exported.get("PACKED_TARBALL", "")
+    report(
+        "pack: exports PACKED_TARBALL and PACKED_DIR for the packed tarball",
+        result.returncode == 0 and tarball.endswith("fixture-1.0.0.tgz") and os.path.isfile(tarball),
+        "exit={} exported={!r} stderr={}".format(result.returncode, exported, result.stderr.strip()),
+    )
+    report(
+        "pack: PACKED_DIR holds what npm packed, not the working tree",
+        {"package.json", "dist/index.js"} <= files and "src/index.ts" not in files,
+        repr(sorted(files)),
+    )
+    report("pack: prepublishOnly runs before the tarball is made", "dist/stamp.txt" in files, repr(sorted(files)))
+
+    # The two steps together, the way the workflow runs them.
+    verified = run([node, verify], env={"PACKED_DIR": exported.get("PACKED_DIR", "")})
+    report("pack + verify: a complete package passes", verified.returncode == 0, verified.stderr.strip())
+    shutil.rmtree(workspace, ignore_errors=True)
+
+    # `files` leaves out a module the manifest exports - built locally, absent from the tarball.
+    narrow = {"name": "fixture", "version": "1.0.0", "files": ["dist/index.js"], "exports": {".": "./dist/index.js", "./extra": "./dist/extra.js"}}
+    workspace, result, exported = call(narrow, {"dist/index.js": "", "dist/extra.js": ""})
+    verified = run([node, verify], env={"PACKED_DIR": exported.get("PACKED_DIR", "")})
+    report(
+        "pack + verify: a module built locally but left out of the tarball fails",
+        result.returncode == 0 and verified.returncode != 0 and "./dist/extra.js" in verified.stderr,
+        "pack exit={} verify exit={} {}".format(result.returncode, verified.returncode, verified.stderr.strip()),
+    )
+    shutil.rmtree(workspace, ignore_errors=True)
+
+    refused = dict(manifest, scripts={"postpublish": "echo done"})
+    workspace, result, exported = call(refused, {"dist/index.js": ""})
+    report(
+        "pack: refuses publish/postpublish scripts a tarball publish would skip",
+        result.returncode != 0 and "postpublish" in result.stderr and not exported,
+        "exit={} stderr={}".format(result.returncode, result.stderr.strip()),
+    )
+    shutil.rmtree(workspace, ignore_errors=True)
+
+    workspace, result, _ = call(manifest, {"dist/index.js": ""}, with_runner_temp=False)
+    report("pack: fails when RUNNER_TEMP is unset", result.returncode != 0)
+    shutil.rmtree(workspace, ignore_errors=True)
+
+    workspace, result, _ = call(manifest, {"dist/index.js": ""}, with_github_env=False)
+    report("pack: fails when GITHUB_ENV is unset", result.returncode != 0)
+    shutil.rmtree(workspace, ignore_errors=True)
+
+
 def main():
     bash = shutil.which("bash")
     node = shutil.which("node")
@@ -224,6 +409,8 @@ def main():
     test_validate_tag(bash)
     test_verify_version(node)
     test_rewrite_exports(node)
+    test_verify_packed_manifest(node)
+    test_pack_for_publish(bash, node)
 
     print("\n{} case(s), {} failure(s)".format(passes + len(failures), len(failures)))
     return 1 if failures else 0

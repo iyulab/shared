@@ -13,7 +13,11 @@ jobs:
     uses: iyulab/shared/.github/workflows/publish-npm.yml@main
     # node_version 은 생략해 재사용 워크플로의 기본값을 따른다 — 여기에 값을 박으면
     # 그 순간부터 공유 기준선과 조용히 벌어진다. 특정 버전 고정이 필요할 때만 켠다.
+    # verify_command 는 게시 직전 tarball 에 대한 패키지 고유 검사다. 선언된 진입점의 존재는
+    # 재사용 워크플로가 이미 검사하므로, 그 밖의 불변식이 있을 때만 켠다. PACKED_DIR 이
+    # 압축을 푼 패키지 루트다.
     # with:
     #   node_version: "24"
+    #   verify_command: node scripts/verify-packed.mjs
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}

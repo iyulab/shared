@@ -13,6 +13,16 @@ on:
         # 특히 22 는 lock-less install 경로에서 번들 npm 의 arborist 가
         # "Cannot read properties of null (reading 'edgesOut')" 로 크래시하는 버전이다.
         default: "24"
+      verify_command:
+        description: >-
+          Optional shell command that checks the packed tarball before it is published.
+          It runs from the repository root after the built-in entry-point check, with
+          PACKED_DIR set to the extracted package root and PACKED_TARBALL to the .tgz
+          that will be published. A non-zero exit stops the publish. The npm token is
+          not in its environment.
+        required: false
+        type: string
+        default: ""
     secrets:
       NPM_TOKEN:
         description: npm token used for publishing.
@@ -106,9 +116,33 @@ jobs:
         if: steps.published.outputs.exists != 'true'
         run: npm run build
 
-      # Publish the package to the public npm registry.
+      # 빌드 산출물이 아니라 실제로 게시될 tarball 을 검사하기 위해 먼저 pack 한다.
+      # 로컬 빌드와 files 글롭이 멀쩡해 보여도 tarball 에서 모듈이 빠질 수 있고, 그것을
+      # 볼 수 있는 곳은 산출물을 손에 쥔 이 단계뿐이다. 스크립트가 PACKED_TARBALL·
+      # PACKED_DIR 을 내보내며, 디렉터리 게시와 같은 lifecycle 순서를 유지한다.
+      - name: Pack
+        if: steps.published.outputs.exists != 'true'
+        run: bash ./.shared/scripts/node/pack-for-publish.sh
+
+      # 게시될 package.json 이 가리키는 모든 경로(main·module·types·browser·bin·
+      # exports·imports, * 패턴 포함)가 tarball 안에 있는지 확인한다. caller 설정이 필요 없다.
+      - name: Verify packed entry points
+        if: steps.published.outputs.exists != 'true'
+        run: node ./.shared/scripts/node/verify-packed-manifest.mjs
+
+      # 패키지 고유 불변식(예: 소스가 등록하는 모듈이 dist 에도 남아 있는가)은 caller 가 가진다.
+      # 입력을 run 에 직접 보간하지 않고 env 로 넘긴다 — 명령 문자열이 스텝 스크립트 텍스트가
+      # 되지 않게. NPM_TOKEN 은 이 스텝에 없다.
+      - name: Verify packed tarball (caller)
+        if: steps.published.outputs.exists != 'true' && inputs.verify_command != ''
+        env:
+          VERIFY_COMMAND: ${{ inputs.verify_command }}
+        run: bash -e -o pipefail -c "$VERIFY_COMMAND"
+
+      # 검증한 tarball 을 그대로 게시한다 — 디렉터리를 다시 pack 하면 검증한 것과 게시되는
+      # 것이 같다는 보장이 없다.
       - name: Publish
         if: steps.published.outputs.exists != 'true'
-        run: npm publish --access public
+        run: npm publish "$PACKED_TARBALL" --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
